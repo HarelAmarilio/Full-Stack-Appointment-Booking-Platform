@@ -17,6 +17,17 @@ function Booking() {
   const minDate = new Date().toISOString().split("T")[0];
 
   const fetchAvailableSlots = async (selectedDate) => {
+    // --- התחלת התוספת לסינון ימי שישי ושבת ---
+    const dateObj = new Date(selectedDate);
+    const dayOfWeek = dateObj.getDay(); // 0 = ראשון, 5 = שישי, 6 = שבת
+
+    if (dayOfWeek === 5 || dayOfWeek === 6) {
+      setMessage("הסטודיו סגור בימים שישי ושבת. נשמח לראותך בשאר ימי השבוע!");
+      setAvailableSlots([]); // מרוקן את השעות אם הוצגו קודם
+      return; // עוצר את הפונקציה ולא פונה לשרת כלל
+    }
+    // --- סוף התוספת ---
+
     try {
       const response = await fetch(
         `${API_BASE_URL}/api/available-slots?date=${selectedDate}`,
@@ -31,6 +42,7 @@ function Booking() {
 
       let validSlots = data;
 
+      // סינון שעות עבר אם נבחר היום הנוכחי (הקוד שהוספנו קודם)
       if (selectedDate === minDate) {
         const now = new Date();
         const currentHour = now.getHours();
@@ -45,6 +57,8 @@ function Booking() {
         });
       }
 
+      // ניקוי הודעות קודמות והצגת השעות
+      setMessage("");
       setAvailableSlots(validSlots);
     } catch (error) {
       console.error("❌ Failed to fetch available slots:", error.message);

@@ -52,6 +52,29 @@ const getAvailableSlots = async (req, res) => {
         .json({ error: "חובה לספק פרמטר date, לדוגמה: ?date=2026-08-25" });
     }
 
+    const requestDate = new Date(date);
+    const dayOfWeek = requestDate.getDay(); // 0 = ראשון, 5 = שישי, 6 = שבת
+
+    // חסימת ימי שישי ושבת
+    if (dayOfWeek === 5 || dayOfWeek === 6) {
+      return res.status(200).json([]);
+    }
+
+    // הגדרת שעות הפעילות הקבועות
+    const ALL_TIME_SLOTS = [
+      "09:00",
+      "10:00",
+      "11:00",
+      "12:00",
+      "13:00",
+      "14:00",
+      "15:00",
+      "16:00",
+      "17:00",
+      "18:00",
+      "19:00",
+    ];
+
     const [bookedRows] = await pool.execute(
       `SELECT appointment_time FROM Appointments
        WHERE appointment_date = ? AND status != 'cancelled'`,
@@ -61,9 +84,32 @@ const getAvailableSlots = async (req, res) => {
     const bookedTimes = bookedRows.map((row) =>
       row.appointment_time.slice(0, 5),
     );
-    const availableSlots = ALL_TIME_SLOTS.filter(
+
+    let availableSlots = ALL_TIME_SLOTS.filter(
       (slot) => !bookedTimes.includes(slot),
     );
+
+    const nowIsrael = new Date(
+      new Date().toLocaleString("en-US", { timeZone: "Asia/Jerusalem" }),
+    );
+
+    const currentYear = nowIsrael.getFullYear();
+    const currentMonth = String(nowIsrael.getMonth() + 1).padStart(2, "0");
+    const currentDay = String(nowIsrael.getDate()).padStart(2, "0");
+    const todayStr = `${currentYear}-${currentMonth}-${currentDay}`;
+
+    if (date === todayStr) {
+      const currentHour = nowIsrael.getHours();
+      const currentMinute = nowIsrael.getMinutes();
+
+      availableSlots = availableSlots.filter((slot) => {
+        const [slotHour, slotMinute] = slot.split(":").map(Number);
+        return (
+          slotHour > currentHour ||
+          (slotHour === currentHour && slotMinute > currentMinute)
+        );
+      });
+    }
 
     res.status(200).json(availableSlots);
   } catch (error) {
