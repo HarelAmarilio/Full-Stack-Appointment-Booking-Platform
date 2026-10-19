@@ -14,6 +14,64 @@ function Booking() {
   const [message, setMessage] = useState("");
   const [isLoading, setIsLoading] = useState(false);
 
+  // --- 1. הוספת משתנה מצב (State) חדש בתחילת הקומפוננטה ---
+  const [selectedService, setSelectedService] = useState(null);
+
+  // רשימת הטיפולים והמחירים כפי שהגדרנו
+  const treatments = [
+    { id: 1, name: "מריטת שיער פנים", price: 35 },
+    { id: 2, name: "עיצוב גבות + צבע", price: 80 },
+    { id: 3, name: "עיצוב גבות טבעיות", price: 70 },
+    { id: 4, name: "עיצוב גבות טבעיות + שפם", price: 75 },
+    { id: 5, name: "עיצוב גבות טבעיות + שפם + צבע", price: 85 },
+  ];
+
+  // ... (כאן נשארת הפונקציה fetchAvailableSlots וכל שאר הלוגיקה שלך) ...
+
+  // --- 2. עדכון אזור ה-return בתחתית הקובץ ---
+  return (
+    <div className="booking-container">
+      {/* שלב 1: בחירת טיפול (יוצג רק אם לא נבחר טיפול עדיין) */}
+      {!selectedService ? (
+        <div className="treatments-step">
+          <h2>בחרי את סוג הטיפול:</h2>
+          <div className="treatments-list">
+            {treatments.map((treatment) => (
+              <button
+                key={treatment.id}
+                className="treatment-card"
+                onClick={() => setSelectedService(treatment)}
+              >
+                <span className="treatment-name">{treatment.name}</span>
+                <span className="treatment-price">₪{treatment.price}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      ) : (
+        /* שלב 2: קביעת תאריך ושעה (הקוד הקיים שלך שמוצג אחרי שנבחר טיפול) */
+        <div className="date-time-step">
+          {/* כפתור חזרה המאפשר לשנות את סוג הטיפול */}
+          <button
+            className="back-button"
+            onClick={() => setSelectedService(null)}
+          >
+            &rarr; חזרה לבחירת טיפול
+          </button>
+
+          <h3 className="selected-treatment-title">
+            טיפול נבחר: {selectedService.name} (₪{selectedService.price})
+          </h3>
+
+          {/* === כאן יופיע כל הקוד הקיים שלך של בחירת תאריך (input type="date"), בחירת שעה ושליחת הטופס === */}
+          {/* לדוגמה: */}
+          {/* <input type="date" min={minDate} onChange={(e) => fetchAvailableSlots(e.target.value)} /> */}
+          {/* ... */}
+        </div>
+      )}
+    </div>
+  );
+
   const minDate = new Date().toISOString().split("T")[0];
 
   const fetchAvailableSlots = async (selectedDate) => {
