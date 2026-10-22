@@ -144,40 +144,41 @@ function Booking() {
 
   const getGoogleCalendarUrl = (date, time) => {
     if (!date || !time) return "#";
-    const startTime = new Date(`${date}T${time}`)
-      .toISOString()
-      .replace(/-|:|\.\d\d\d/g, "");
-    const endTime = new Date(
-      new Date(`${date}T${time}`).getTime() + 60 * 60 * 1000,
-    )
-      .toISOString()
-      .replace(/-|:|\.\d\d\d/g, "");
+
+    const [hour, minute] = time.split(":");
+    const endHour = String(Number(hour) + 1).padStart(2, "0");
+    const formattedDate = date.replace(/-/g, "");
+
+    const startTime = `${formattedDate}T${hour}${minute}00`;
+    const endTime = `${formattedDate}T${endHour}${minute}00`;
 
     const title = encodeURIComponent(
       `תור ל${selectedService?.name || "עיצוב גבות"} - ניני`,
     );
     const details = encodeURIComponent("מחכה לך! 🤍");
 
-    return `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${title}&dates=${startTime}/${endTime}&details=${details}`;
+    return `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${title}&dates=${startTime}/${endTime}&ctz=Asia/Jerusalem&details=${details}`;
   };
 
   const downloadAppleCalendarIcs = (date, time) => {
     if (!date || !time) return;
-    const startTime = new Date(`${date}T${time}`)
-      .toISOString()
-      .replace(/-|:|\.\d\d\d/g, "");
-    const endTime = new Date(
-      new Date(`${date}T${time}`).getTime() + 60 * 60 * 1000,
-    )
-      .toISOString()
-      .replace(/-|:|\.\d\d\d/g, "");
+
+    const [hour, minute] = time.split(":");
+    const endHour = String(Number(hour) + 1).padStart(2, "0");
+    const formattedDate = date.replace(/-/g, "");
+
+    const startTime = `${formattedDate}T${hour}${minute}00`;
+    const endTime = `${formattedDate}T${endHour}${minute}00`;
 
     const icsContent = [
       "BEGIN:VCALENDAR",
       "VERSION:2.0",
+      "BEGIN:VTIMEZONE",
+      "TZID:Asia/Jerusalem",
+      "END:VTIMEZONE",
       "BEGIN:VEVENT",
-      `DTSTART:${startTime}`,
-      `DTEND:${endTime}`,
+      `DTSTART;TZID=Asia/Jerusalem:${startTime}`,
+      `DTEND;TZID=Asia/Jerusalem:${endTime}`,
       `SUMMARY:תור ל${selectedService?.name || "עיצוב גבות"} - ניני`,
       "DESCRIPTION:מחכה לך! 🤍",
       "END:VEVENT",

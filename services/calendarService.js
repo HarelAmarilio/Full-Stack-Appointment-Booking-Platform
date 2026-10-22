@@ -19,22 +19,23 @@ async function addEventToCalendar(
   clientPhone,
   appointmentDate,
   appointmentTime,
-  treatmentType, // התוספת החדשה
+  treatmentType,
 ) {
-  const eventStartTime = new Date(
-    `${appointmentDate}T${appointmentTime}:00+03:00`,
-  );
-  const eventEndTime = new Date(eventStartTime.getTime() + 60 * 60 * 1000);
+  // חישוב שעת הסיום בצורה טקסטואלית כדי למנוע באגים של שעון חורף/קיץ
+  const [hour, minute] = appointmentTime.split(":").map(Number);
+  const endHour = String(hour + 1).padStart(2, "0");
+  const endTimeString = `${endHour}:${String(minute).padStart(2, "0")}`;
 
   const event = {
     summary: `תור: ${clientName} - ${treatmentType || "לא צוין טיפול"}`,
     description: `לקוחה: ${clientName}\nטלפון הלקוחה: ${clientPhone}\nסוג טיפול: ${treatmentType || "לא צוין"}`,
     start: {
-      dateTime: eventStartTime.toISOString(),
+      // שליחת המחרוזת כפי שהיא, ללא "+03:00"
+      dateTime: `${appointmentDate}T${appointmentTime}:00`,
       timeZone: "Asia/Jerusalem",
     },
     end: {
-      dateTime: eventEndTime.toISOString(),
+      dateTime: `${appointmentDate}T${endTimeString}:00`,
       timeZone: "Asia/Jerusalem",
     },
   };
@@ -44,7 +45,7 @@ async function addEventToCalendar(
     requestBody: event,
   });
 
-  return googleResponse.data.id; // מחזיר את המזהה הייחודי של גוגל
+  return googleResponse.data.id;
 }
 
 // פונקציה למחיקת אירוע מהיומן
