@@ -17,7 +17,6 @@ const ALL_TIME_SLOTS = [
   "18:00",
 ];
 
-// A function for data validation
 const validateAppointmentData = (name, phone, date, time) => {
   if (!name || name.trim().length < 2) {
     return "נא להזין שם מלא תקין (לפחות 2 תווים).";
@@ -53,14 +52,12 @@ const getAvailableSlots = async (req, res) => {
     }
 
     const requestDate = new Date(date);
-    const dayOfWeek = requestDate.getDay(); // 0 = ראשון, 5 = שישי, 6 = שבת
+    const dayOfWeek = requestDate.getDay();
 
-    // חסימת ימי שישי ושבת
     if (dayOfWeek === 5 || dayOfWeek === 6) {
       return res.status(200).json([]);
     }
 
-    // הגדרת שעות הפעילות הקבועות
     const ALL_TIME_SLOTS = [
       "09:00",
       "10:00",
@@ -102,11 +99,13 @@ const getAvailableSlots = async (req, res) => {
       const currentHour = nowIsrael.getHours();
       const currentMinute = nowIsrael.getMinutes();
 
+      const bufferHour = currentHour + 2;
+
       availableSlots = availableSlots.filter((slot) => {
         const [slotHour, slotMinute] = slot.split(":").map(Number);
         return (
-          slotHour > currentHour ||
-          (slotHour === currentHour && slotMinute > currentMinute)
+          slotHour > bufferHour ||
+          (slotHour === bufferHour && slotMinute > currentMinute)
         );
       });
     }
@@ -120,17 +119,21 @@ const getAvailableSlots = async (req, res) => {
 
 // 2. יצירת תור חדש
 const createAppointment = async (req, res) => {
-  const { client_name, client_phone, appointment_date, appointment_time } =
-    req.body;
+  // חילוץ סוג הטיפול מהבקשה
+  let {
+    client_name,
+    client_phone,
+    appointment_date,
+    appointment_time,
+    treatment_type,
+  } = req.body;
 
-  // הוסף את הבלוק הזה כדי לעצור בקשות חסרות מיד
   if (!client_name || !client_phone || !appointment_date || !appointment_time) {
     return res.status(400).json({ error: "חסרים נתוני חובה לקביעת התור" });
   }
   console.log("👉 השרת קיבל בקשה ליצירת תור! נתונים:", req.body);
+
   try {
-    let { client_name, client_phone, appointment_date, appointment_time } =
-      req.body;
     const validationError = validateAppointmentData(
       client_name,
       client_phone,
@@ -140,23 +143,10 @@ const createAppointment = async (req, res) => {
     if (validationError) {
       return res.status(400).json({ error: validationError });
     }
-    if (
-      !client_name ||
-      !client_phone ||
-      !appointment_date ||
-      !appointment_time
-    ) {
-      return res.status(400).json({
-        error:
-          "חובה לספק את כל השדות: client_name, client_phone, appointment_date, appointment_time",
-      });
-    }
 
-    // ניקוי נתונים
     client_phone = client_phone.trim().replace(/[- ]/g, "");
     client_name = client_name.trim();
 
-    // בדיקת כפילות טלפון ביום
     const [clientAppointments] = await pool.execute(
       `SELECT id FROM Appointments
        WHERE appointment_date = ? AND client_phone = ? AND status != 'cancelled'`,
@@ -170,7 +160,6 @@ const createAppointment = async (req, res) => {
       });
     }
 
-    // בדיקת זמינות שעה
     const [existingRows] = await pool.execute(
       `SELECT id FROM Appointments
        WHERE appointment_date = ? AND appointment_time = ? AND status != 'cancelled'`,
@@ -183,25 +172,30 @@ const createAppointment = async (req, res) => {
       });
     }
 
-    // שמירה ב-DB
     const [result] = await pool.execute(
-      `INSERT INTO Appointments (client_name, client_phone, appointment_date, appointment_time, status)
-       VALUES (?, ?, ?, ?, 'pending')`,
-      [client_name, client_phone, appointment_date, appointment_time],
+      `INSERT INTO Appointments (client_name, client_phone, appointment_date, appointment_time, treatment_type, status)
+   VALUES (?, ?, ?, ?, ?, 'pending')`,
+      [
+        client_name,
+        client_phone,
+        appointment_date,
+        appointment_time,
+        treatment_type,
+      ],
     );
 
     const appointmentId = result.insertId;
 
-    // אינטגרציה עם גוגל יומן דרך ה-Service
     try {
+      // העברת סוג הטיפול לפונקציה שאחראית על לוח השנה
       const googleEventId = await addEventToCalendar(
         client_name,
         client_phone,
         appointment_date,
         appointment_time,
+        treatment_type,
       );
 
-      // עדכון ה-google_event_id במסד הנתונים
       await pool.execute(
         `UPDATE Appointments SET google_event_id = ? WHERE id = ?`,
         [googleEventId, appointmentId],
@@ -220,6 +214,7 @@ const createAppointment = async (req, res) => {
         client_phone,
         appointment_date,
         appointment_time,
+        treatment_type,
         status: "pending",
       },
     });

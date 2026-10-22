@@ -56,11 +56,13 @@ function Booking() {
         const currentHour = now.getHours();
         const currentMinute = now.getMinutes();
 
+        const bufferHour = currentHour + 2;
+
         validSlots = data.filter((slot) => {
           const [slotHour, slotMinute] = slot.split(":").map(Number);
           return (
-            slotHour > currentHour ||
-            (slotHour === currentHour && slotMinute > currentMinute)
+            slotHour > bufferHour ||
+            (slotHour === bufferHour && slotMinute > currentMinute)
           );
         });
       }
@@ -108,6 +110,7 @@ function Booking() {
         client_phone: phone,
         appointment_date: date,
         appointment_time: selectedTime,
+        treatment_type: selectedService.name,
       });
 
       setBookedDetails({ date: date, time: selectedTime, name: name });

@@ -19,6 +19,7 @@ async function addEventToCalendar(
   clientPhone,
   appointmentDate,
   appointmentTime,
+  treatmentType, // התוספת החדשה
 ) {
   const eventStartTime = new Date(
     `${appointmentDate}T${appointmentTime}:00+03:00`,
@@ -26,8 +27,8 @@ async function addEventToCalendar(
   const eventEndTime = new Date(eventStartTime.getTime() + 60 * 60 * 1000);
 
   const event = {
-    summary: `תור: ${clientName}`,
-    description: `טלפון הלקוחה: ${clientPhone}`,
+    summary: `תור: ${clientName} - ${treatmentType || "לא צוין טיפול"}`,
+    description: `לקוחה: ${clientName}\nטלפון הלקוחה: ${clientPhone}\nסוג טיפול: ${treatmentType || "לא צוין"}`,
     start: {
       dateTime: eventStartTime.toISOString(),
       timeZone: "Asia/Jerusalem",
