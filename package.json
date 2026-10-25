@@ -33,7 +33,7 @@
   "main": "vite.config.js",
   "repository": {
     "type": "git",
-    "url": "git+https://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@github.com/HarelAmarilio/queue-management-system.git"
+    "url": "git+https://github.com/HarelAmarilio/queue-management-system.git"
   },
   "keywords": [],
   "author": "",

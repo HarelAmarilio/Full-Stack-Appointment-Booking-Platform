@@ -15,6 +15,7 @@ const ALL_TIME_SLOTS = [
   "16:00",
   "17:00",
   "18:00",
+  "19:00",
 ];
 
 const validateAppointmentData = (name, phone, date, time) => {
@@ -25,16 +26,45 @@ const validateAppointmentData = (name, phone, date, time) => {
   const cleanPhone = phone.replace(/[- ]/g, "");
   const phoneRegex = /^0\d{8,9}$/;
   if (!phoneRegex.test(cleanPhone)) {
-    return "מספר הטלפון שהוזן אינו תקין. נא להזין מספר ישראלי חוקי (למשל: 0501234567).";
-  }
-
-  const today = new Date().toISOString().split("T")[0];
-  if (date < today) {
-    return "לא ניתן לקבוע תור לתאריך עבר.";
+    return "מספר הטלפון שהוזן אינו תקין.";
   }
 
   if (!ALL_TIME_SLOTS.includes(time)) {
     return "השעה שנבחרה אינה נמצאת בשעות הפעילות המותרות.";
+  }
+
+  // חישוב התאריך הנוכחי לפי שעון ישראל בלבד (מונע פערים בחצות)
+  const nowIsrael = new Date(
+    new Date().toLocaleString("en-US", { timeZone: "Asia/Jerusalem" }),
+  );
+  const currentYear = nowIsrael.getFullYear();
+  const currentMonth = String(nowIsrael.getMonth() + 1).padStart(2, "0");
+  const currentDay = String(nowIsrael.getDate()).padStart(2, "0");
+  const todayStr = `${currentYear}-${currentMonth}-${currentDay}`;
+
+  if (date < todayStr) {
+    return "לא ניתן לקבוע תור לתאריך עבר.";
+  }
+
+  // אכיפת חסימת סופ"ש בבקשות POST ישירות
+  const requestDate = new Date(date);
+  const dayOfWeek = requestDate.getDay();
+  if (dayOfWeek === 5 || dayOfWeek === 6) {
+    return "לא ניתן לקבוע תורים בימי שישי ושבת.";
+  }
+
+  // אכיפת ה-Buffer (שעתיים) עבור תורים מהיום להיום
+  if (date === todayStr) {
+    const currentHour = nowIsrael.getHours();
+    const currentMinute = nowIsrael.getMinutes();
+    const [slotHour] = time.split(":").map(Number);
+
+    // תיקון החישוב: אם השעה 14:15, המינימום יהיה 17:00 (שעתיים + עיגול שעה למעלה)
+    const minAllowedHour = currentHour + 2 + (currentMinute > 0 ? 1 : 0);
+
+    if (slotHour < minAllowedHour) {
+      return "יש לקבוע תור לפחות שעתיים מראש.";
+    }
   }
 
   return null;
