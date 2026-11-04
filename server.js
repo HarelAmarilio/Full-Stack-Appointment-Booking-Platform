@@ -9,12 +9,28 @@ const { initDB } = require("./db");
 // Importing appointment routes
 const appointmentRoutes = require("./routes/appointmentRoutes");
 
+// [Abuse protection] Rate limiter applied to all /api requests
+const { apiLimiter } = require("./middleware/rateLimiters");
+
 const app = express();
 const PORT = process.env.PORT || 5001;
+
+// [Abuse protection] Render serves the API behind a proxy. Without this, every customer
+// would appear to have the proxy's IP and the rate limits would block everyone together.
+app.set("trust proxy", Number(process.env.TRUST_PROXY_HOPS ?? 1));
+
+// [Abuse protection] Warn loudly at startup if admin login is not configured (login is refused in that case)
+["ADMIN_USERNAME", "ADMIN_PASSWORD", "JWT_SECRET"].forEach((name) => {
+  if (!process.env[name]) {
+    console.error(`⚠️ משתנה הסביבה ${name} חסר - התחברות המנהלת חסומה.`);
+  }
+});
 
 // Middleware setup
 app.use(cors());
 app.use(express.json());
+// [Abuse protection] General per-IP limit on the whole API
+app.use("/api", apiLimiter);
 
 // Endpoint to check if the server is running
 app.get("/", (req, res) => {

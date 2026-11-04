@@ -58,6 +58,43 @@ async function initDB() {
       }
     }
 
+    // [Race-condition fix] Generated column: 1 for active appointments, NULL for cancelled ones.
+    // A UNIQUE index ignores NULLs, so cancelled appointments never block a slot.
+    try {
+      await pool.execute(
+        `ALTER TABLE Appointments ADD COLUMN is_active TINYINT
+         GENERATED ALWAYS AS (IF(status <> 'cancelled', 1, NULL)) STORED`,
+      );
+      console.log("✅ עמודת is_active התווספה בהצלחה למסד הנתונים!");
+    } catch (error) {
+      if (error.code !== "ER_DUP_FIELDNAME") {
+        console.error("⚠️ הערה בנוגע לעמודה is_active:", error.message);
+      }
+    }
+
+    // [Race-condition fix] Let the database itself reject double bookings, even for concurrent requests:
+    // one active appointment per slot, and one active appointment per phone per day.
+    const uniqueIndexes = [
+      "ALTER TABLE Appointments ADD UNIQUE KEY uniq_active_slot (appointment_date, appointment_time, is_active)",
+      "ALTER TABLE Appointments ADD UNIQUE KEY uniq_active_client_day (appointment_date, client_phone, is_active)",
+    ];
+    for (const sql of uniqueIndexes) {
+      try {
+        await pool.execute(sql);
+        console.log("✅ אינדקס ייחודי נוסף:", sql.split(" ")[6]);
+      } catch (error) {
+        if (error.code === "ER_DUP_ENTRY") {
+          // Existing data already contains duplicates - the index cannot be created until they are resolved
+          console.error(
+            "⚠️ לא ניתן ליצור אינדקס ייחודי - קיימים תורים כפולים במסד הנתונים:",
+            error.message,
+          );
+        } else if (error.code !== "ER_DUP_KEYNAME") {
+          console.error("⚠️ הערה בנוגע לאינדקס הייחודי:", error.message);
+        }
+      }
+    }
+
     console.log("טבלת Appointments מוכנה לשימוש");
   } catch (error) {
     console.error("שגיאה באתחול מסד הנתונים:", error.message);

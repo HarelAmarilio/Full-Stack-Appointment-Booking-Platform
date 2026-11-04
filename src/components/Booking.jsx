@@ -26,6 +26,10 @@ function Booking() {
   ];
 
   const minDate = new Date().toISOString().split("T")[0];
+  // [Abuse protection] Mirrors the server's 60-day booking window (the server is the authority)
+  const maxDate = new Date(Date.now() + 60 * 24 * 60 * 60 * 1000)
+    .toISOString()
+    .split("T")[0];
 
   const fetchAvailableSlots = async (selectedDate) => {
     const dateObj = new Date(selectedDate);
@@ -249,6 +253,8 @@ function Booking() {
                   type="date"
                   value={date}
                   min={minDate}
+                  // [Abuse protection] Limit the date picker to the booking window
+                  max={maxDate}
                   onChange={(event) => setDate(event.target.value)}
                   required
                 />
@@ -288,6 +294,8 @@ function Booking() {
                   value={name}
                   onChange={(event) => setName(event.target.value)}
                   placeholder="שם מלא"
+                  // [Abuse protection] Matches the server's 100-character name limit
+                  maxLength={100}
                   required
                 />
               </div>

@@ -18,9 +18,43 @@ const ALL_TIME_SLOTS = [
   "19:00",
 ];
 
+// [Abuse protection] Booking window and input limits - stops bots from filling the calendar far ahead
+const MAX_DAYS_AHEAD = 60;
+const MAX_NAME_LENGTH = 100;
+const DATE_FORMAT_REGEX = /^\d{4}-\d{2}-\d{2}$/;
+
+// [Abuse protection] Last bookable date (YYYY-MM-DD), counted from today in Israel
+const getMaxBookingDateStr = () => {
+  const nowIsrael = new Date(
+    new Date().toLocaleString("en-US", { timeZone: "Asia/Jerusalem" }),
+  );
+  return new Date(
+    Date.UTC(
+      nowIsrael.getFullYear(),
+      nowIsrael.getMonth(),
+      nowIsrael.getDate() + MAX_DAYS_AHEAD,
+    ),
+  )
+    .toISOString()
+    .slice(0, 10);
+};
+
 const validateAppointmentData = (name, phone, date, time) => {
   if (!name || name.trim().length < 2) {
     return "נא להזין שם מלא תקין (לפחות 2 תווים).";
+  }
+
+  // [Abuse protection] Cap the name length (longer names also overflowed the DB column -> 500)
+  if (name.trim().length > MAX_NAME_LENGTH) {
+    return `השם ארוך מדי (עד ${MAX_NAME_LENGTH} תווים).`;
+  }
+
+  // [Abuse protection] Strict date format and booking window
+  if (!DATE_FORMAT_REGEX.test(date)) {
+    return "תאריך לא תקין.";
+  }
+  if (date > getMaxBookingDateStr()) {
+    return `ניתן לקבוע תור עד ${MAX_DAYS_AHEAD} יום מראש.`;
   }
 
   const cleanPhone = phone.replace(/[- ]/g, "");
@@ -79,6 +113,16 @@ const getAvailableSlots = async (req, res) => {
       return res
         .status(400)
         .json({ error: "חובה לספק פרמטר date, לדוגמה: ?date=2026-08-25" });
+    }
+
+    // [Abuse protection] Reject malformed dates before they reach the DB
+    if (!DATE_FORMAT_REGEX.test(date)) {
+      return res.status(400).json({ error: "תאריך לא תקין." });
+    }
+
+    // [Abuse protection] Nothing is bookable beyond the booking window
+    if (date > getMaxBookingDateStr()) {
+      return res.status(200).json([]);
     }
 
     const requestDate = new Date(date);
@@ -202,17 +246,34 @@ const createAppointment = async (req, res) => {
       });
     }
 
-    const [result] = await pool.execute(
-      `INSERT INTO Appointments (client_name, client_phone, appointment_date, appointment_time, treatment_type, status)
+    // [Race-condition fix] The checks above can both pass for two simultaneous requests.
+    // The UNIQUE indexes (see db.js) make the database reject the second INSERT - translate that into a 409.
+    let result;
+    try {
+      [result] = await pool.execute(
+        `INSERT INTO Appointments (client_name, client_phone, appointment_date, appointment_time, treatment_type, status)
    VALUES (?, ?, ?, ?, ?, 'pending')`,
-      [
-        client_name,
-        client_phone,
-        appointment_date,
-        appointment_time,
-        treatment_type,
-      ],
-    );
+        [
+          client_name,
+          client_phone,
+          appointment_date,
+          appointment_time,
+          treatment_type,
+        ],
+      );
+    } catch (insertError) {
+      if (insertError.code === "ER_DUP_ENTRY") {
+        const isSameClient = insertError.message.includes(
+          "uniq_active_client_day",
+        );
+        return res.status(409).json({
+          error: isSameClient
+            ? "כבר קיים תור למספר טלפון זה בתאריך המבוקש. לא ניתן לקבוע יותר מתור אחד ביום."
+            : "השעה המבוקשת כבר תפוסה, אנא בחר/י שעה אחרת",
+        });
+      }
+      throw insertError;
+    }
 
     const appointmentId = result.insertId;
 

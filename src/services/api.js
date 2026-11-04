@@ -46,19 +46,26 @@ export const createAppointment = async (appointmentData) => {
 };
 
 // Deleting an appointment by ID
-export const deleteAppointment = async (appointmentId) => {
+// [Security fix] Now calls the admin-only endpoint and sends the admin JWT token
+export const deleteAppointment = async (appointmentId, token) => {
   try {
     const response = await fetch(
-      `${API_BASE_URL}/appointments/${appointmentId}`,
+      `${API_BASE_URL}/admin/appointments/${appointmentId}`,
       {
         method: "DELETE",
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
       },
     );
 
     const data = await response.json();
 
     if (!response.ok) {
-      throw new Error(data.error || "שגיאה בביטול התור");
+      const error = new Error(data.error || "שגיאה בביטול התור");
+      // [Security fix] Expose the HTTP status so the dashboard can detect an expired session (401)
+      error.status = response.status;
+      throw error;
     }
 
     return data;

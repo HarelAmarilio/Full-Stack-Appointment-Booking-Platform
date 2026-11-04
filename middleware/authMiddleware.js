@@ -11,7 +11,10 @@ const verifyAdmin = (req, res, next) => {
     // Remove the "Bearer " prefix from the token string
     const token = authHeader.replace("Bearer ", "");
     // Verify the token using the secret key
-    const verified = jwt.verify(token, process.env.JWT_SECRET);
+    // [Abuse protection] Only accept HS256 - the algorithm our tokens are signed with
+    const verified = jwt.verify(token, process.env.JWT_SECRET, {
+      algorithms: ["HS256"],
+    });
 
     // Attach the verified admin user to the request object for further use
     req.admin = verified;

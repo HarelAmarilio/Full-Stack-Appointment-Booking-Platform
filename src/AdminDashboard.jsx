@@ -61,7 +61,8 @@ const AdminDashboard = () => {
     const confirmed = window.confirm("האם לבטל את התור הזה?");
     if (!confirmed) return;
     try {
-      await deleteAppointment(id);
+      // [Security fix] Send the admin token - cancelling now requires authentication
+      await deleteAppointment(id, token);
       // Update the local state to reflect the deletion without refetching
       setAppointments(
         appointments.map((app) =>
@@ -70,6 +71,12 @@ const AdminDashboard = () => {
       );
       alert("התור בוטל בהצלחה!");
     } catch (err) {
+      // [Security fix] Expired/invalid token - return the admin to the login screen
+      if (err.status === 401) {
+        setError("פג תוקף ההתחברות. אנא התחבר/י מחדש.");
+        handleLogout();
+        return;
+      }
       alert("שגיאה בביטול התור");
     }
   };
