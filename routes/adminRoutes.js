@@ -11,6 +11,12 @@ const { deleteAppointment } = require("../controllers/appointmentController");
 // [Abuse protection] Brute-force protection for the admin login
 const { loginLimiter } = require("../middleware/rateLimiters");
 
+// [PII protection] Admin responses contain customer data - never cache them
+router.use((req, res, next) => {
+  res.set("Cache-Control", "no-store");
+  next();
+});
+
 // A route for admin login
 // [Abuse protection] loginLimiter blocks an IP after 5 failed attempts in 15 minutes
 router.post("/login", loginLimiter, login);

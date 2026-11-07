@@ -3,6 +3,8 @@ Also, importing the dotenv library to load environment variables from a .env fil
 */
 require("dotenv").config();
 const mysql = require("mysql2/promise");
+// [PII protection] Keeps phone numbers out of the logs
+const { redactPhones } = require("./utils/redact");
 
 /*
  Creating a connection pool for MySQL database operations.
@@ -87,7 +89,8 @@ async function initDB() {
           // Existing data already contains duplicates - the index cannot be created until they are resolved
           console.error(
             "⚠️ לא ניתן ליצור אינדקס ייחודי - קיימים תורים כפולים במסד הנתונים:",
-            error.message,
+            // [PII protection] The duplicate-entry message quotes the duplicate value (may include a phone)
+            redactPhones(error.message),
           );
         } else if (error.code !== "ER_DUP_KEYNAME") {
           console.error("⚠️ הערה בנוגע לאינדקס הייחודי:", error.message);

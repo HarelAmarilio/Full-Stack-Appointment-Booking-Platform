@@ -2,6 +2,8 @@ const jwt = require("jsonwebtoken");
 // [Abuse protection] Node's built-in crypto, for constant-time credential comparison
 const crypto = require("crypto");
 const { pool } = require("../db");
+// [PII protection] Keeps phone numbers out of the logs
+const { redactPhones } = require("../utils/redact");
 
 // [Abuse protection] Compares two strings in constant time (hashing makes the lengths equal),
 // so response timing does not leak how much of the username/password was correct
@@ -45,11 +47,19 @@ const getAllAppointmentsForAdmin = async (req, res) => {
   try {
     // Fetch all appointments from the database, ordered by date and time
     const [rows] = await pool.execute(
-      `SELECT * FROM Appointments ORDER BY appointment_date DESC, appointment_time DESC`,
+      // [PII protection] Explicit columns (the original 8) instead of SELECT *, so internal or
+      // future columns are never exposed automatically. The response shape is unchanged.
+      `SELECT id, client_name, client_phone, appointment_date, appointment_time,
+              status, google_event_id, treatment_type
+       FROM Appointments ORDER BY appointment_date DESC, appointment_time DESC`,
     );
     res.status(200).json(rows);
   } catch (error) {
-    console.error("❌ שגיאה בשליפת התורים לאדמין:", error.message);
+    // [PII protection] DB error messages can contain row values
+    console.error(
+      "❌ שגיאה בשליפת התורים לאדמין:",
+      redactPhones(error.message),
+    );
     res.status(500).json({ error: "שגיאה בשליפת הנתונים" });
   }
 };

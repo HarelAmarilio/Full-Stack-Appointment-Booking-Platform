@@ -1,4 +1,6 @@
 const { pool } = require("../db");
+// [PII protection] Helpers for keeping phone numbers out of the logs
+const { maskPhone, redactPhones } = require("../utils/redact");
 const {
   addEventToCalendar,
   deleteEventFromCalendar,
@@ -186,7 +188,11 @@ const getAvailableSlots = async (req, res) => {
 
     res.status(200).json(availableSlots);
   } catch (error) {
-    console.error("❌ Failed to fetch available slots:", error.message);
+    // [PII protection] DB error messages can contain row values
+    console.error(
+      "❌ Failed to fetch available slots:",
+      redactPhones(error.message),
+    );
     res.status(500).json({ error: "שגיאה בשליפת השעות הפנויות" });
   }
 };
@@ -205,7 +211,13 @@ const createAppointment = async (req, res) => {
   if (!client_name || !client_phone || !appointment_date || !appointment_time) {
     return res.status(400).json({ error: "חסרים נתוני חובה לקביעת התור" });
   }
-  console.log("👉 השרת קיבל בקשה ליצירת תור! נתונים:", req.body);
+  // [PII protection] Log only what is needed for support - no name, masked phone
+  console.log("👉 השרת קיבל בקשה ליצירת תור!", {
+    date: appointment_date,
+    time: appointment_time,
+    treatment: treatment_type,
+    phone: maskPhone(client_phone),
+  });
 
   try {
     const validationError = validateAppointmentData(
@@ -297,6 +309,8 @@ const createAppointment = async (req, res) => {
       console.error("❌ שגיאה בשמירה ליומן של גוגל:", calendarError.message);
     }
 
+    // [PII protection] The response echoes the customer's details - never cache it
+    res.set("Cache-Control", "no-store");
     res.status(201).json({
       message: "התור נקבע בהצלחה!",
       appointment: {
@@ -310,7 +324,11 @@ const createAppointment = async (req, res) => {
       },
     });
   } catch (error) {
-    console.error("❌ Failed to create appointment:", error.message);
+    // [PII protection] DB error messages can contain row values
+    console.error(
+      "❌ Failed to create appointment:",
+      redactPhones(error.message),
+    );
     res.status(500).json({ error: "שגיאה בקביעת התור" });
   }
 };
@@ -322,7 +340,8 @@ const deleteAppointment = async (req, res) => {
 
   try {
     const [rows] = await pool.execute(
-      `SELECT * FROM Appointments WHERE id = ? AND status != 'cancelled'`,
+      // [PII protection] Fetch only what cancellation needs - no customer data
+      `SELECT id, google_event_id FROM Appointments WHERE id = ? AND status != 'cancelled'`,
       [appointmentId],
     );
 
@@ -356,7 +375,8 @@ const deleteAppointment = async (req, res) => {
       deletedId: appointmentId,
     });
   } catch (error) {
-    console.error("❌ שגיאה במחיקת התור:", error.message);
+    // [PII protection] DB error messages can contain row values
+    console.error("❌ שגיאה במחיקת התור:", redactPhones(error.message));
     res.status(500).json({ error: "שגיאה פנימית במחיקת התור" });
   }
 };
