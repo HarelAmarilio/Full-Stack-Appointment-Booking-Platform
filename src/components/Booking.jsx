@@ -8,6 +8,8 @@ import {
 } from "../utils/israelTime";
 // [Validation fix] Single treatment list, shared with the server's validation
 import treatments from "../../shared/treatments.json";
+// [ICS fix] Standards-compliant calendar file builder
+import { buildIcs } from "../utils/ics";
 
 const API_BASE_URL = "https://yarin-appointments-api.onrender.com";
 
@@ -94,7 +96,8 @@ function Booking() {
 
     try {
       // כאן ניתן להעביר לשרת גם את selectedService.name כדי לשמור את סוג הטיפול במסד הנתונים בעתיד
-      await createAppointment({
+      // [ICS fix] Keep the response - its appointment ID makes the calendar file's UID stable
+      const result = await createAppointment({
         client_name: name,
         client_phone: phone,
         appointment_date: date,
@@ -102,7 +105,12 @@ function Booking() {
         treatment_type: selectedService.name,
       });
 
-      setBookedDetails({ date: date, time: selectedTime, name: name });
+      setBookedDetails({
+        date: date,
+        time: selectedTime,
+        name: name,
+        id: result?.appointment?.id, // [ICS fix]
+      });
       setMessage("התור נקבע בהצלחה! ✅");
 
       setDate("");
@@ -153,32 +161,34 @@ function Booking() {
     if (!date || !time) return;
 
     // [TZ fix] Exact UTC instants ("20261110T080000Z") instead of an empty, invalid VTIMEZONE
-    const toIcsUtc = (d) =>
-      d.toISOString().replace(/[-:]/g, "").replace(/\.\d{3}/, "");
     const start = israelLocalToUtc(date, time);
     const end = new Date(start.getTime() + 60 * 60 * 1000);
 
-    const icsContent = [
-      "BEGIN:VCALENDAR",
-      "VERSION:2.0",
-      "BEGIN:VEVENT",
-      `DTSTART:${toIcsUtc(start)}`,
-      `DTEND:${toIcsUtc(end)}`,
-      `SUMMARY:תור ל${selectedService?.name || "עיצוב גבות"} - ניני`,
-      "DESCRIPTION:מחכה לך! 🤍",
-      "END:VEVENT",
-      "END:VCALENDAR",
-    ].join("\n");
+    // [ICS fix] RFC 5545-compliant file (PRODID, UID, DTSTAMP, CRLF, folding, escaping)
+    const icsContent = buildIcs({
+      // Stable per appointment; random fallback if the response had no ID
+      uid: `appointment-${
+        bookedDetails?.id ??
+        `${Date.now()}-${Math.random().toString(36).slice(2)}`
+      }@nini-eyebrows`,
+      start,
+      end,
+      summary: `תור ל${selectedService?.name || "עיצוב גבות"} - ניני`,
+      description: "מחכה לך! 🤍",
+    });
 
     const blob = new Blob([icsContent], {
       type: "text/calendar;charset=utf-8",
     });
     const link = document.createElement("a");
-    link.href = window.URL.createObjectURL(blob);
+    const url = window.URL.createObjectURL(blob); // [ICS fix]
+    link.href = url;
     link.setAttribute("download", "nini-appointment.ics");
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+    // [ICS fix] Release the blob once the download has started (revoking immediately breaks it in some browsers)
+    setTimeout(() => window.URL.revokeObjectURL(url), 1000);
   };
 
   // ה-return היחיד והנכון של הקומפוננטה
