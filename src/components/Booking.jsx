@@ -6,6 +6,8 @@ import {
   getDayOfWeek,
   israelLocalToUtc,
 } from "../utils/israelTime";
+// [Validation fix] Single treatment list, shared with the server's validation
+import treatments from "../../shared/treatments.json";
 
 const API_BASE_URL = "https://yarin-appointments-api.onrender.com";
 
@@ -22,14 +24,7 @@ function Booking() {
   // משתנה לבחירת הטיפול
   const [selectedService, setSelectedService] = useState(null);
 
-  // רשימת הטיפולים והמחירים
-  const treatments = [
-    { id: 1, name: "מריטת שיער פנים", price: 35 },
-    { id: 2, name: "עיצוב גבות + צבע", price: 80 },
-    { id: 3, name: "עיצוב גבות טבעיות", price: 70 },
-    { id: 4, name: "עיצוב גבות טבעיות + שפם", price: 75 },
-    { id: 5, name: "עיצוב גבות טבעיות + שפם + צבע", price: 85 },
-  ];
+  // רשימת הטיפולים והמחירים - [Validation fix] now in shared/treatments.json
 
   // [Buffer fix] Today in Israel (YYYY-MM-DD), not UTC - fixes the picker allowing yesterday after midnight
   // [TZ fix] Shared Israel-time helper

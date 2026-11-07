@@ -27,6 +27,16 @@ const MAX_DAYS_AHEAD = 60;
 const MAX_NAME_LENGTH = 100;
 const DATE_FORMAT_REGEX = /^\d{4}-\d{2}-\d{2}$/;
 
+// [Validation fix] Same treatment list the booking page shows (shared/treatments.json)
+const TREATMENT_NAMES = require("../shared/treatments.json").map((t) => t.name);
+
+// [Validation fix] "YYYY-MM-DD" that is also a real calendar day (rejects 2026-02-31, 2026-13-45)
+const isValidDateStr = (value) => {
+  if (typeof value !== "string" || !DATE_FORMAT_REGEX.test(value)) return false;
+  const parsed = new Date(`${value}T00:00:00Z`);
+  return !isNaN(parsed) && parsed.toISOString().slice(0, 10) === value;
+};
+
 // [Abuse protection] Last bookable date (YYYY-MM-DD), counted from today in Israel
 const getMaxBookingDateStr = () => {
   // [TZ fix] One shared "today in Israel" (getIsraelNow below)
@@ -71,7 +81,12 @@ const isSlotBookable = (date, slot, now = getIsraelNow()) => {
   return hour * 60 + minute - now.minutes >= BOOKING_BUFFER_MINUTES;
 };
 
-const validateAppointmentData = (name, phone, date, time) => {
+const validateAppointmentData = (name, phone, date, time, treatment) => {
+  // [Validation fix] JSON can carry numbers/objects/arrays - anything but a string is a 400, not a crash
+  if ([name, phone, date, time].some((value) => typeof value !== "string")) {
+    return "נתונים לא תקינים.";
+  }
+
   if (!name || name.trim().length < 2) {
     return "נא להזין שם מלא תקין (לפחות 2 תווים).";
   }
@@ -82,7 +97,8 @@ const validateAppointmentData = (name, phone, date, time) => {
   }
 
   // [Abuse protection] Strict date format and booking window
-  if (!DATE_FORMAT_REGEX.test(date)) {
+  // [Validation fix] isValidDateStr also rejects days that don't exist
+  if (!isValidDateStr(date)) {
     return "תאריך לא תקין.";
   }
   if (date > getMaxBookingDateStr()) {
@@ -119,6 +135,12 @@ const validateAppointmentData = (name, phone, date, time) => {
     return "יש לקבוע תור לפחות שעתיים מראש.";
   }
 
+  // [Validation fix] Treatment stays optional (as before), but if sent it must be one the studio offers -
+  // stops arbitrary text from being written into the owner's Google Calendar
+  if (treatment != null && !TREATMENT_NAMES.includes(treatment)) {
+    return "סוג הטיפול שנבחר אינו קיים. נא לבחור טיפול מהרשימה.";
+  }
+
   return null;
 };
 
@@ -134,7 +156,8 @@ const getAvailableSlots = async (req, res) => {
     }
 
     // [Abuse protection] Reject malformed dates before they reach the DB
-    if (!DATE_FORMAT_REGEX.test(date)) {
+    // [Validation fix] ...and dates that don't exist, or repeated ?date= params (arrays)
+    if (!isValidDateStr(date)) {
       return res.status(400).json({ error: "תאריך לא תקין." });
     }
 
@@ -192,7 +215,7 @@ const createAppointment = async (req, res) => {
     appointment_date,
     appointment_time,
     treatment_type,
-  } = req.body;
+  } = req.body ?? {}; // [Validation fix] Express 5: req.body is undefined when no JSON was sent
 
   if (!client_name || !client_phone || !appointment_date || !appointment_time) {
     return res.status(400).json({ error: "חסרים נתוני חובה לקביעת התור" });
@@ -211,6 +234,7 @@ const createAppointment = async (req, res) => {
       client_phone,
       appointment_date,
       appointment_time,
+      treatment_type, // [Validation fix]
     );
     if (validationError) {
       return res.status(400).json({ error: validationError });
