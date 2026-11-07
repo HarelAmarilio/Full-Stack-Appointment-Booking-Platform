@@ -8,141 +8,19 @@ const {
 // [Calendar sync fix] Shared with the retry job so the two never sync the same appointment at once
 const { inFlight } = require("../services/calendarSyncJob");
 
-const ALL_TIME_SLOTS = [
-  "09:00",
-  "10:00",
-  "11:00",
-  "12:00",
-  "13:00",
-  "14:00",
-  "15:00",
-  "16:00",
-  "17:00",
-  "18:00",
-  "19:00",
-];
-
-// [Abuse protection] Booking window and input limits - stops bots from filling the calendar far ahead
-const MAX_DAYS_AHEAD = 60;
-const MAX_NAME_LENGTH = 100;
-const DATE_FORMAT_REGEX = /^\d{4}-\d{2}-\d{2}$/;
-
-// [Validation fix] Same treatment list the booking page shows (shared/treatments.json)
-const TREATMENT_NAMES = require("../shared/treatments.json").map((t) => t.name);
-
-// [Validation fix] "YYYY-MM-DD" that is also a real calendar day (rejects 2026-02-31, 2026-13-45)
-const isValidDateStr = (value) => {
-  if (typeof value !== "string" || !DATE_FORMAT_REGEX.test(value)) return false;
-  const parsed = new Date(`${value}T00:00:00Z`);
-  return !isNaN(parsed) && parsed.toISOString().slice(0, 10) === value;
-};
-
-// [Abuse protection] Last bookable date (YYYY-MM-DD), counted from today in Israel
-const getMaxBookingDateStr = () => {
-  // [TZ fix] One shared "today in Israel" (getIsraelNow below)
-  const [y, m, d] = getIsraelNow().dateStr.split("-").map(Number);
-  return new Date(Date.UTC(y, m - 1, d + MAX_DAYS_AHEAD))
-    .toISOString()
-    .slice(0, 10);
-};
-
-// [TZ fix] Day of week (0 = Sunday) of a calendar date, independent of the server's time zone
-const getDayOfWeek = (dateStr) => new Date(`${dateStr}T00:00:00Z`).getUTCDay();
-
-// [Buffer fix] Single source of truth for the same-day buffer: at least 2 hours ahead, Israel time
-const BOOKING_BUFFER_MINUTES = 120;
-
-// [Buffer fix] Current date and minutes-since-midnight in Israel, independent of the server's time zone
-const getIsraelNow = () => {
-  const parts = Object.fromEntries(
-    new Intl.DateTimeFormat("en-CA", {
-      timeZone: "Asia/Jerusalem",
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-      hourCycle: "h23",
-    })
-      .formatToParts(new Date())
-      .map((part) => [part.type, part.value]),
-  );
-  return {
-    dateStr: `${parts.year}-${parts.month}-${parts.day}`,
-    minutes: Number(parts.hour) * 60 + Number(parts.minute),
-  };
-};
-
-// [Buffer fix] The one rule used by both the slot list and booking validation
-const isSlotBookable = (date, slot, now = getIsraelNow()) => {
-  if (date < now.dateStr) return false;
-  if (date > now.dateStr) return true;
-  const [hour, minute] = slot.split(":").map(Number);
-  return hour * 60 + minute - now.minutes >= BOOKING_BUFFER_MINUTES;
-};
-
-const validateAppointmentData = (name, phone, date, time, treatment) => {
-  // [Validation fix] JSON can carry numbers/objects/arrays - anything but a string is a 400, not a crash
-  if ([name, phone, date, time].some((value) => typeof value !== "string")) {
-    return "נתונים לא תקינים.";
-  }
-
-  if (!name || name.trim().length < 2) {
-    return "נא להזין שם מלא תקין (לפחות 2 תווים).";
-  }
-
-  // [Abuse protection] Cap the name length (longer names also overflowed the DB column -> 500)
-  if (name.trim().length > MAX_NAME_LENGTH) {
-    return `השם ארוך מדי (עד ${MAX_NAME_LENGTH} תווים).`;
-  }
-
-  // [Abuse protection] Strict date format and booking window
-  // [Validation fix] isValidDateStr also rejects days that don't exist
-  if (!isValidDateStr(date)) {
-    return "תאריך לא תקין.";
-  }
-  if (date > getMaxBookingDateStr()) {
-    return `ניתן לקבוע תור עד ${MAX_DAYS_AHEAD} יום מראש.`;
-  }
-
-  const cleanPhone = phone.replace(/[- ]/g, "");
-  const phoneRegex = /^0\d{8,9}$/;
-  if (!phoneRegex.test(cleanPhone)) {
-    return "מספר הטלפון שהוזן אינו תקין.";
-  }
-
-  if (!ALL_TIME_SLOTS.includes(time)) {
-    return "השעה שנבחרה אינה נמצאת בשעות הפעילות המותרות.";
-  }
-
-  // חישוב התאריך הנוכחי לפי שעון ישראל בלבד (מונע פערים בחצות)
-  // [Buffer fix] Shared Israel-time "now"
-  const now = getIsraelNow();
-
-  if (date < now.dateStr) {
-    return "לא ניתן לקבוע תור לתאריך עבר.";
-  }
-
-  // אכיפת חסימת סופ"ש בבקשות POST ישירות
-  const dayOfWeek = getDayOfWeek(date); // [TZ fix]
-  if (dayOfWeek === 5 || dayOfWeek === 6) {
-    return "לא ניתן לקבוע תורים בימי שישי ושבת.";
-  }
-
-  // אכיפת ה-Buffer (שעתיים) עבור תורים מהיום להיום
-  // [Buffer fix] Same rule as the slot list
-  if (!isSlotBookable(date, time, now)) {
-    return "יש לקבוע תור לפחות שעתיים מראש.";
-  }
-
-  // [Validation fix] Treatment stays optional (as before), but if sent it must be one the studio offers -
-  // stops arbitrary text from being written into the owner's Google Calendar
-  if (treatment != null && !TREATMENT_NAMES.includes(treatment)) {
-    return "סוג הטיפול שנבחר אינו קיים. נא לבחור טיפול מהרשימה.";
-  }
-
-  return null;
-};
+// [Rules fix] All business rules (hours, closed days, buffer, window, phone, treatments) live in
+// domain/schedule.js, driven by shared/businessRules.json - the booking page reads the same file
+const {
+  TIME_SLOTS,
+  TREATMENTS,
+  isValidDateStr,
+  isClosedDay,
+  normalizePhone,
+  getIsraelNow,
+  getMaxBookingDateStr,
+  isSlotBookable,
+  validateBooking,
+} = require("../domain/schedule");
 
 // 1. שליפת שעות פנויות
 const getAvailableSlots = async (req, res) => {
@@ -161,24 +39,22 @@ const getAvailableSlots = async (req, res) => {
       return res.status(400).json({ error: "תאריך לא תקין." });
     }
 
+    // [Buffer fix] Past dates have no bookable slots (booking validation already rejects them)
+    const now = getIsraelNow();
+
     // [Abuse protection] Nothing is bookable beyond the booking window
-    if (date > getMaxBookingDateStr()) {
+    if (date > getMaxBookingDateStr(now)) {
       return res.status(200).json([]);
     }
 
-    // [Buffer fix] Past dates have no bookable slots (booking validation already rejects them)
-    const now = getIsraelNow();
     if (date < now.dateStr) {
       return res.status(200).json([]);
     }
 
-    const dayOfWeek = getDayOfWeek(date); // [TZ fix]
-
-    if (dayOfWeek === 5 || dayOfWeek === 6) {
+    // [Rules fix] Closed days come from the business rules (Friday and Saturday today)
+    if (isClosedDay(date)) {
       return res.status(200).json([]);
     }
-
-    // [Buffer fix] Removed an identical local copy of ALL_TIME_SLOTS - the module-level list is used
 
     const [bookedRows] = await pool.execute(
       `SELECT appointment_time FROM Appointments
@@ -191,7 +67,7 @@ const getAvailableSlots = async (req, res) => {
     );
 
     // [Buffer fix] Same rule as booking validation
-    const availableSlots = ALL_TIME_SLOTS.filter(
+    const availableSlots = TIME_SLOTS.filter(
       (slot) => !bookedTimes.includes(slot) && isSlotBookable(date, slot, now),
     );
 
@@ -229,18 +105,19 @@ const createAppointment = async (req, res) => {
   });
 
   try {
-    const validationError = validateAppointmentData(
-      client_name,
-      client_phone,
-      appointment_date,
-      appointment_time,
-      treatment_type, // [Validation fix]
-    );
+    // [Rules fix] Validation lives in the domain module
+    const validationError = validateBooking({
+      name: client_name,
+      phone: client_phone,
+      date: appointment_date,
+      time: appointment_time,
+      treatment: treatment_type,
+    });
     if (validationError) {
       return res.status(400).json({ error: validationError });
     }
 
-    client_phone = client_phone.trim().replace(/[- ]/g, "");
+    client_phone = normalizePhone(client_phone); // [Rules fix]
     client_name = client_name.trim();
 
     const [clientAppointments] = await pool.execute(
@@ -406,8 +283,14 @@ const deleteAppointment = async (req, res) => {
   }
 };
 
+// [Rules fix] Treatment catalogue served from the API (single source: shared/businessRules.json)
+const getTreatments = (req, res) => {
+  res.status(200).json(TREATMENTS);
+};
+
 module.exports = {
   getAvailableSlots,
   createAppointment,
   deleteAppointment,
+  getTreatments, // [Rules fix]
 };

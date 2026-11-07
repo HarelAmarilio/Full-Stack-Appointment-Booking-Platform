@@ -1,6 +1,8 @@
 const { google } = require("googleapis");
 // [Calendar sync fix] Node's built-in crypto, for deterministic event IDs
 const crypto = require("crypto");
+// [Rules fix] Appointment length and time zone come from the business rules
+const { RULES, getEndTime } = require("../domain/schedule");
 
 // [Calendar sync fix] Bound every Google call - a slow Google must not hang a booking
 const GOOGLE_TIMEOUT_MS = 10000;
@@ -46,9 +48,8 @@ async function addEventToCalendar(
   );
 
   // חישוב שעת הסיום בצורה טקסטואלית כדי למנוע באגים של שעון חורף/קיץ
-  const [hour, minute] = appointmentTime.split(":").map(Number);
-  const endHour = String(hour + 1).padStart(2, "0");
-  const endTimeString = `${endHour}:${String(minute).padStart(2, "0")}`;
+  // [Rules fix] start + appointmentDurationMinutes (wall-clock), instead of a hard-coded "+1 hour"
+  const endTimeString = getEndTime(appointmentTime);
 
   const event = {
     id: eventId, // [Calendar sync fix]
@@ -57,11 +58,11 @@ async function addEventToCalendar(
     start: {
       // שליחת המחרוזת כפי שהיא, ללא "+03:00"
       dateTime: `${appointmentDate}T${appointmentTime}:00`,
-      timeZone: "Asia/Jerusalem",
+      timeZone: RULES.timezone, // [Rules fix]
     },
     end: {
       dateTime: `${appointmentDate}T${endTimeString}:00`,
-      timeZone: "Asia/Jerusalem",
+      timeZone: RULES.timezone, // [Rules fix]
     },
   };
 

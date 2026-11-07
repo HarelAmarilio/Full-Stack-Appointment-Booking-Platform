@@ -1,5 +1,8 @@
+// [Rules fix] Time zone comes from the shared business rules
+import rules from "../../shared/businessRules.json";
+
 // [TZ fix] Business dates/times are always Israel wall-clock time, wherever the device is
-export const ISRAEL_TZ = "Asia/Jerusalem";
+export const ISRAEL_TZ = rules.timezone;
 
 const getIsraelParts = (date = new Date()) =>
   Object.fromEntries(

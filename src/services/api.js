@@ -20,6 +20,13 @@ export const fetchAvailableSlots = async (date) => {
   }
 };
 
+// [Rules fix] Fetching the treatment catalogue (source of truth: shared/businessRules.json on the server)
+export const fetchTreatments = async () => {
+  const response = await fetch(`${API_BASE_URL}/treatments`);
+  if (!response.ok) throw new Error("שגיאה בשליפת רשימת הטיפולים");
+  return response.json();
+};
+
 // 2. Creating a new appointment
 export const createAppointment = async (appointmentData) => {
   try {

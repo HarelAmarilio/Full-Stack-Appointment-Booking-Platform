@@ -1,0 +1,18 @@
+{
+  "timezone": "Asia/Jerusalem",
+  "workingHours": { "firstSlot": "09:00", "lastSlot": "19:00" },
+  "appointmentDurationMinutes": 60,
+  "closedDays": [5, 6],
+  "closedDaysLabel": "שישי ושבת",
+  "bookingBufferMinutes": 120,
+  "maxDaysAhead": 60,
+  "maxNameLength": 100,
+  "phonePattern": "^0\\d{8,9}$",
+  "treatments": [
+    { "id": 1, "name": "מריטת שיער פנים", "price": 35 },
+    { "id": 2, "name": "עיצוב גבות + צבע", "price": 80 },
+    { "id": 3, "name": "עיצוב גבות טבעיות", "price": 70 },
+    { "id": 4, "name": "עיצוב גבות טבעיות + שפם", "price": 75 },
+    { "id": 5, "name": "עיצוב גבות טבעיות + שפם + צבע", "price": 85 }
+  ]
+}

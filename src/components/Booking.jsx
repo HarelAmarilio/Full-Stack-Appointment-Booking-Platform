@@ -1,15 +1,26 @@
 import { useState, useEffect } from "react";
-import { createAppointment } from "../services/api"; // הסרנו את הייבוא הכפול של fetchAvailableSlots
+import { createAppointment, fetchTreatments } from "../services/api"; // הסרנו את הייבוא הכפול של fetchAvailableSlots
 // [TZ fix] Israel-time helpers - dates behave the same on every device
 import {
   getIsraelDateStr,
   getDayOfWeek,
   israelLocalToUtc,
 } from "../utils/israelTime";
-// [Validation fix] Single treatment list, shared with the server's validation
-import treatments from "../../shared/treatments.json";
+// [Rules fix] Business rules shared with the server (hours, closed days, window, phone, treatments)
+import rules from "../../shared/businessRules.json";
 // [ICS fix] Standards-compliant calendar file builder
-import { buildIcs } from "../utils/ics";
+import { buildIcs, formatIcsUtc } from "../utils/ics";
+
+// [Rules fix] One source for an appointment's exact start/end (used by both calendar buttons)
+const getAppointmentTimes = (date, time) => {
+  const start = israelLocalToUtc(date, time);
+  const end = new Date(
+    start.getTime() + rules.appointmentDurationMinutes * 60 * 1000,
+  );
+  return { start, end };
+};
+
+const PHONE_REGEX = new RegExp(rules.phonePattern); // [Rules fix]
 
 const API_BASE_URL = "https://yarin-appointments-api.onrender.com";
 
@@ -26,21 +37,32 @@ function Booking() {
   // משתנה לבחירת הטיפול
   const [selectedService, setSelectedService] = useState(null);
 
-  // רשימת הטיפולים והמחירים - [Validation fix] now in shared/treatments.json
+  // רשימת הטיפולים והמחירים
+  // [Rules fix] Shown instantly from the bundled rules, then replaced by the API's list (the source
+  // of truth). If the API is unreachable, the bundled list stays.
+  const [treatments, setTreatments] = useState(rules.treatments);
+  useEffect(() => {
+    fetchTreatments()
+      .then((list) => {
+        if (Array.isArray(list) && list.length > 0) setTreatments(list);
+      })
+      .catch(() => {});
+  }, []);
 
   // [Buffer fix] Today in Israel (YYYY-MM-DD), not UTC - fixes the picker allowing yesterday after midnight
   // [TZ fix] Shared Israel-time helper
   const minDate = getIsraelDateStr();
-  // [Abuse protection] Mirrors the server's 60-day booking window (the server is the authority)
+  // [Abuse protection] Mirrors the server's booking window (the server is the authority)
   // [TZ fix] Counted in Israel days, not UTC
-  const maxDate = getIsraelDateStr(60);
+  const maxDate = getIsraelDateStr(rules.maxDaysAhead); // [Rules fix]
 
   const fetchAvailableSlots = async (selectedDate) => {
     // [TZ fix] Correct weekday in any time zone (getDay() shifted Sunday to Saturday west of Israel)
-    const dayOfWeek = getDayOfWeek(selectedDate);
-
-    if (dayOfWeek === 5 || dayOfWeek === 6) {
-      setMessage("הסטודיו סגור בימים שישי ושבת. נשמח לראותך בשאר ימי השבוע!");
+    // [Rules fix] Closed days come from the shared rules
+    if (rules.closedDays.includes(getDayOfWeek(selectedDate))) {
+      setMessage(
+        `הסטודיו סגור בימים ${rules.closedDaysLabel}. נשמח לראותך בשאר ימי השבוע!`,
+      );
       setAvailableSlots([]);
       return;
     }
@@ -84,9 +106,9 @@ function Booking() {
       return;
     }
 
-    const cleanPhone = phone.replace(/[- ]/g, "");
-    const phoneRegex = /^0\d{8,9}$/;
-    if (!phoneRegex.test(cleanPhone)) {
+    // [Rules fix] Same phone rule and normalisation as the server
+    const cleanPhone = phone.trim().replace(/[- ]/g, "");
+    if (!PHONE_REGEX.test(cleanPhone)) {
       setMessage("מספר הטלפון אינו תקין. נא להזין מספר ישראלי חוקי.");
       return;
     }
@@ -142,27 +164,25 @@ function Booking() {
   const getGoogleCalendarUrl = (date, time) => {
     if (!date || !time) return "#";
 
-    const [hour, minute] = time.split(":");
-    const endHour = String(Number(hour) + 1).padStart(2, "0");
-    const formattedDate = date.replace(/-/g, "");
-
-    const startTime = `${formattedDate}T${hour}${minute}00`;
-    const endTime = `${formattedDate}T${endHour}${minute}00`;
+    // [Rules fix] Same exact start/end as the .ics file, in UTC form ("20261110T080000Z")
+    const { start, end } = getAppointmentTimes(date, time);
+    const startTime = formatIcsUtc(start);
+    const endTime = formatIcsUtc(end);
 
     const title = encodeURIComponent(
       `תור ל${selectedService?.name || "עיצוב גבות"} - ניני`,
     );
     const details = encodeURIComponent("מחכה לך! 🤍");
 
-    return `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${title}&dates=${startTime}/${endTime}&ctz=Asia/Jerusalem&details=${details}`;
+    return `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${title}&dates=${startTime}/${endTime}&ctz=${rules.timezone}&details=${details}`;
   };
 
   const downloadAppleCalendarIcs = (date, time) => {
     if (!date || !time) return;
 
     // [TZ fix] Exact UTC instants ("20261110T080000Z") instead of an empty, invalid VTIMEZONE
-    const start = israelLocalToUtc(date, time);
-    const end = new Date(start.getTime() + 60 * 60 * 1000);
+    // [Rules fix] Shared start/end helper (appointment length from the rules)
+    const { start, end } = getAppointmentTimes(date, time);
 
     // [ICS fix] RFC 5545-compliant file (PRODID, UID, DTSTAMP, CRLF, folding, escaping)
     const icsContent = buildIcs({
@@ -286,7 +306,7 @@ function Booking() {
                   onChange={(event) => setName(event.target.value)}
                   placeholder="שם מלא"
                   // [Abuse protection] Matches the server's 100-character name limit
-                  maxLength={100}
+                  maxLength={rules.maxNameLength}
                   required
                 />
               </div>
