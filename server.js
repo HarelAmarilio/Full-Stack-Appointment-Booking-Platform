@@ -5,6 +5,8 @@ const cors = require("cors");
 const adminRoutes = require("./routes/adminRoutes");
 // Importing the initDB function from db.js
 const { initDB } = require("./db");
+// [Calendar sync fix] Retry job for appointments missing from / stuck in Google Calendar
+const { startCalendarSync } = require("./services/calendarSyncJob");
 
 // Importing appointment routes
 const appointmentRoutes = require("./routes/appointmentRoutes");
@@ -42,7 +44,11 @@ app.use("/api", appointmentRoutes);
 app.use("/api/admin", adminRoutes);
 // Starting the server and initializing the database connection
 initDB()
-  .then(() => console.log("✅ Database connected and setup successfully"))
+  .then(() => {
+    console.log("✅ Database connected and setup successfully");
+    // [Calendar sync fix] Start the retry job once the DB is ready (never during tests)
+    if (process.env.NODE_ENV !== "test") startCalendarSync();
+  })
   .catch((error) =>
     console.error("❌ Failed to connect to the database:", error.message),
   );

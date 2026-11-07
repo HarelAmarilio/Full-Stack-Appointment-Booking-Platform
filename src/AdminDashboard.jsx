@@ -212,6 +212,17 @@ const AdminDashboard = () => {
                     <span className={`status-badge ${badgeClass}`}>
                       {displayStatus}
                     </span>
+                    {/* [Calendar sync fix] Active upcoming appointment not yet in Google Calendar */}
+                    {app.status !== "cancelled" &&
+                      !isPast &&
+                      !app.google_event_id && (
+                        <span
+                          className="status-badge not-synced"
+                          title="המערכת תנסה שוב אוטומטית"
+                        >
+                          ⚠️ לא ביומן
+                        </span>
+                      )}
                   </td>
                   {activeTab === "active" && (
                     <td>

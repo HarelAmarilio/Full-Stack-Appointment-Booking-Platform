@@ -1,4 +1,20 @@
 const { google } = require("googleapis");
+// [Calendar sync fix] Node's built-in crypto, for deterministic event IDs
+const crypto = require("crypto");
+
+// [Calendar sync fix] Bound every Google call - a slow Google must not hang a booking
+const GOOGLE_TIMEOUT_MS = 10000;
+
+// [Calendar sync fix] Deterministic event ID (hex is valid for Google event IDs).
+// Retrying the same appointment can never create a duplicate event.
+const buildEventId = (appointmentId, date, time, phone) =>
+  crypto
+    .createHash("sha256")
+    .update(`${appointmentId}|${date}|${time}|${phone}`)
+    .digest("hex");
+
+// [Calendar sync fix] HTTP status of a googleapis error
+const getStatus = (error) => error.status ?? error.response?.status;
 
 // הגדרת ה-oauth2Client והיומן
 const oauth2Client = new google.auth.OAuth2(
@@ -20,13 +36,22 @@ async function addEventToCalendar(
   appointmentDate,
   appointmentTime,
   treatmentType,
+  appointmentId, // [Calendar sync fix] used for the deterministic event ID
 ) {
+  const eventId = buildEventId(
+    appointmentId,
+    appointmentDate,
+    appointmentTime,
+    clientPhone,
+  );
+
   // חישוב שעת הסיום בצורה טקסטואלית כדי למנוע באגים של שעון חורף/קיץ
   const [hour, minute] = appointmentTime.split(":").map(Number);
   const endHour = String(hour + 1).padStart(2, "0");
   const endTimeString = `${endHour}:${String(minute).padStart(2, "0")}`;
 
   const event = {
+    id: eventId, // [Calendar sync fix]
     summary: `תור: ${clientName} - ${treatmentType || "לא צוין טיפול"}`,
     description: `לקוחה: ${clientName}\nטלפון הלקוחה: ${clientPhone}\nסוג טיפול: ${treatmentType || "לא צוין"}`,
     start: {
@@ -40,24 +65,37 @@ async function addEventToCalendar(
     },
   };
 
-  const googleResponse = await calendar.events.insert({
-    calendarId: "primary",
-    requestBody: event,
-  });
+  try {
+    await calendar.events.insert(
+      {
+        calendarId: "primary",
+        requestBody: event,
+      },
+      { timeout: GOOGLE_TIMEOUT_MS }, // [Calendar sync fix]
+    );
+  } catch (error) {
+    // [Calendar sync fix] 409 = this exact event was already created by an earlier attempt
+    if (getStatus(error) !== 409) throw error;
+  }
 
-  return googleResponse.data.id;
+  return eventId;
 }
 
 // פונקציה למחיקת אירוע מהיומן
 // פונקציה למחיקת אירוע מהיומן של גוגל לפי מזהה
 const deleteEventFromCalendar = async (eventId) => {
   try {
-    await calendar.events.delete({
-      calendarId: "primary",
-      eventId: eventId,
-    });
+    await calendar.events.delete(
+      {
+        calendarId: "primary",
+        eventId: eventId,
+      },
+      { timeout: GOOGLE_TIMEOUT_MS }, // [Calendar sync fix]
+    );
     console.log(`✅ אירוע ${eventId} נמחק בהצלחה מגוגל יומן`);
   } catch (error) {
+    // [Calendar sync fix] 404/410 = the event is already gone - that is the goal, not an error
+    if ([404, 410].includes(getStatus(error))) return;
     console.error("❌ שגיאה במחיקת אירוע מגוגל יומן:", error.message);
     throw error;
   }
@@ -66,4 +104,5 @@ const deleteEventFromCalendar = async (eventId) => {
 module.exports = {
   addEventToCalendar,
   deleteEventFromCalendar,
+  getStatus, // [Calendar sync fix] used by the sync job
 };

@@ -141,3 +141,10 @@
   background-color: #e0f2fe;
   color: #0284c7;
 }
+
+/* [Calendar sync fix] Appointment not yet in Google Calendar */
+.status-badge.not-synced {
+  background-color: #fff3cd;
+  color: #856404;
+  margin-inline-start: 6px;
+}

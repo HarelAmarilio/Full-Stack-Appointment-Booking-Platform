@@ -5,6 +5,8 @@ const {
   addEventToCalendar,
   deleteEventFromCalendar,
 } = require("../services/calendarService");
+// [Calendar sync fix] Shared with the retry job so the two never sync the same appointment at once
+const { inFlight } = require("../services/calendarSyncJob");
 
 const ALL_TIME_SLOTS = [
   "09:00",
@@ -273,6 +275,7 @@ const createAppointment = async (req, res) => {
 
     const appointmentId = result.insertId;
 
+    inFlight.add(appointmentId); // [Calendar sync fix] the retry job must not race this call
     try {
       // העברת סוג הטיפול לפונקציה שאחראית על לוח השנה
       const googleEventId = await addEventToCalendar(
@@ -281,16 +284,24 @@ const createAppointment = async (req, res) => {
         appointment_date,
         appointment_time,
         treatment_type,
+        appointmentId, // [Calendar sync fix] for the deterministic event ID
       );
 
       await pool.execute(
-        `UPDATE Appointments SET google_event_id = ? WHERE id = ?`,
+        // [Calendar sync fix] Never overwrite an ID the retry job may have stored
+        `UPDATE Appointments SET google_event_id = ? WHERE id = ? AND google_event_id IS NULL`,
         [googleEventId, appointmentId],
       );
 
       console.log(`✅ האירוע נשמר בגוגל יומן בהצלחה (ID: ${googleEventId})!`);
     } catch (calendarError) {
-      console.error("❌ שגיאה בשמירה ליומן של גוגל:", calendarError.message);
+      // [Calendar sync fix] Not lost: google_event_id stays NULL and the sync job retries every 5 minutes
+      console.error(
+        "❌ שגיאה בשמירה ליומן של גוגל (ננסה שוב אוטומטית):",
+        redactPhones(calendarError.message),
+      );
+    } finally {
+      inFlight.delete(appointmentId);
     }
 
     // [PII protection] The response echoes the customer's details - never cache it
@@ -337,22 +348,28 @@ const deleteAppointment = async (req, res) => {
 
     const appointment = rows[0];
 
-    if (appointment.google_event_id) {
-      try {
-        await deleteEventFromCalendar(appointment.google_event_id);
-        console.log(`✅ האירוע הוסר בהצלחה מ-Google Calendar!`);
-      } catch (googleError) {
-        console.error(
-          "⚠️ שגיאה במחיקת האירוע מגוגל (נמשיך במחיקה מ-DB):",
-          googleError.message,
-        );
-      }
-    }
-
+    // [Calendar sync fix] The DB is the source of truth - cancel there first
     await pool.execute(
       `UPDATE Appointments SET status = 'cancelled' WHERE id = ?`,
       [appointmentId],
     );
+
+    if (appointment.google_event_id) {
+      try {
+        await deleteEventFromCalendar(appointment.google_event_id);
+        // [Calendar sync fix] NULL = "no longer in the calendar"; a remaining ID means the job will retry
+        await pool.execute(
+          `UPDATE Appointments SET google_event_id = NULL WHERE id = ?`,
+          [appointmentId],
+        );
+        console.log(`✅ האירוע הוסר בהצלחה מ-Google Calendar!`);
+      } catch (googleError) {
+        console.error(
+          "⚠️ שגיאה במחיקת האירוע מגוגל (ננסה שוב אוטומטית):",
+          redactPhones(googleError.message),
+        );
+      }
+    }
 
     res.status(200).json({
       message: "התור בוטל ונמחק בהצלחה!",
