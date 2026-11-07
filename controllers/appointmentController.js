@@ -27,18 +27,46 @@ const DATE_FORMAT_REGEX = /^\d{4}-\d{2}-\d{2}$/;
 
 // [Abuse protection] Last bookable date (YYYY-MM-DD), counted from today in Israel
 const getMaxBookingDateStr = () => {
-  const nowIsrael = new Date(
-    new Date().toLocaleString("en-US", { timeZone: "Asia/Jerusalem" }),
-  );
-  return new Date(
-    Date.UTC(
-      nowIsrael.getFullYear(),
-      nowIsrael.getMonth(),
-      nowIsrael.getDate() + MAX_DAYS_AHEAD,
-    ),
-  )
+  // [TZ fix] One shared "today in Israel" (getIsraelNow below)
+  const [y, m, d] = getIsraelNow().dateStr.split("-").map(Number);
+  return new Date(Date.UTC(y, m - 1, d + MAX_DAYS_AHEAD))
     .toISOString()
     .slice(0, 10);
+};
+
+// [TZ fix] Day of week (0 = Sunday) of a calendar date, independent of the server's time zone
+const getDayOfWeek = (dateStr) => new Date(`${dateStr}T00:00:00Z`).getUTCDay();
+
+// [Buffer fix] Single source of truth for the same-day buffer: at least 2 hours ahead, Israel time
+const BOOKING_BUFFER_MINUTES = 120;
+
+// [Buffer fix] Current date and minutes-since-midnight in Israel, independent of the server's time zone
+const getIsraelNow = () => {
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Asia/Jerusalem",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23",
+    })
+      .formatToParts(new Date())
+      .map((part) => [part.type, part.value]),
+  );
+  return {
+    dateStr: `${parts.year}-${parts.month}-${parts.day}`,
+    minutes: Number(parts.hour) * 60 + Number(parts.minute),
+  };
+};
+
+// [Buffer fix] The one rule used by both the slot list and booking validation
+const isSlotBookable = (date, slot, now = getIsraelNow()) => {
+  if (date < now.dateStr) return false;
+  if (date > now.dateStr) return true;
+  const [hour, minute] = slot.split(":").map(Number);
+  return hour * 60 + minute - now.minutes >= BOOKING_BUFFER_MINUTES;
 };
 
 const validateAppointmentData = (name, phone, date, time) => {
@@ -70,37 +98,23 @@ const validateAppointmentData = (name, phone, date, time) => {
   }
 
   // חישוב התאריך הנוכחי לפי שעון ישראל בלבד (מונע פערים בחצות)
-  const nowIsrael = new Date(
-    new Date().toLocaleString("en-US", { timeZone: "Asia/Jerusalem" }),
-  );
-  const currentYear = nowIsrael.getFullYear();
-  const currentMonth = String(nowIsrael.getMonth() + 1).padStart(2, "0");
-  const currentDay = String(nowIsrael.getDate()).padStart(2, "0");
-  const todayStr = `${currentYear}-${currentMonth}-${currentDay}`;
+  // [Buffer fix] Shared Israel-time "now"
+  const now = getIsraelNow();
 
-  if (date < todayStr) {
+  if (date < now.dateStr) {
     return "לא ניתן לקבוע תור לתאריך עבר.";
   }
 
   // אכיפת חסימת סופ"ש בבקשות POST ישירות
-  const requestDate = new Date(date);
-  const dayOfWeek = requestDate.getDay();
+  const dayOfWeek = getDayOfWeek(date); // [TZ fix]
   if (dayOfWeek === 5 || dayOfWeek === 6) {
     return "לא ניתן לקבוע תורים בימי שישי ושבת.";
   }
 
   // אכיפת ה-Buffer (שעתיים) עבור תורים מהיום להיום
-  if (date === todayStr) {
-    const currentHour = nowIsrael.getHours();
-    const currentMinute = nowIsrael.getMinutes();
-    const [slotHour] = time.split(":").map(Number);
-
-    // תיקון החישוב: אם השעה 14:15, המינימום יהיה 17:00 (שעתיים + עיגול שעה למעלה)
-    const minAllowedHour = currentHour + 2 + (currentMinute > 0 ? 1 : 0);
-
-    if (slotHour < minAllowedHour) {
-      return "יש לקבוע תור לפחות שעתיים מראש.";
-    }
+  // [Buffer fix] Same rule as the slot list
+  if (!isSlotBookable(date, time, now)) {
+    return "יש לקבוע תור לפחות שעתיים מראש.";
   }
 
   return null;
@@ -127,26 +141,19 @@ const getAvailableSlots = async (req, res) => {
       return res.status(200).json([]);
     }
 
-    const requestDate = new Date(date);
-    const dayOfWeek = requestDate.getDay();
+    // [Buffer fix] Past dates have no bookable slots (booking validation already rejects them)
+    const now = getIsraelNow();
+    if (date < now.dateStr) {
+      return res.status(200).json([]);
+    }
+
+    const dayOfWeek = getDayOfWeek(date); // [TZ fix]
 
     if (dayOfWeek === 5 || dayOfWeek === 6) {
       return res.status(200).json([]);
     }
 
-    const ALL_TIME_SLOTS = [
-      "09:00",
-      "10:00",
-      "11:00",
-      "12:00",
-      "13:00",
-      "14:00",
-      "15:00",
-      "16:00",
-      "17:00",
-      "18:00",
-      "19:00",
-    ];
+    // [Buffer fix] Removed an identical local copy of ALL_TIME_SLOTS - the module-level list is used
 
     const [bookedRows] = await pool.execute(
       `SELECT appointment_time FROM Appointments
@@ -158,33 +165,10 @@ const getAvailableSlots = async (req, res) => {
       row.appointment_time.slice(0, 5),
     );
 
-    let availableSlots = ALL_TIME_SLOTS.filter(
-      (slot) => !bookedTimes.includes(slot),
+    // [Buffer fix] Same rule as booking validation
+    const availableSlots = ALL_TIME_SLOTS.filter(
+      (slot) => !bookedTimes.includes(slot) && isSlotBookable(date, slot, now),
     );
-
-    const nowIsrael = new Date(
-      new Date().toLocaleString("en-US", { timeZone: "Asia/Jerusalem" }),
-    );
-
-    const currentYear = nowIsrael.getFullYear();
-    const currentMonth = String(nowIsrael.getMonth() + 1).padStart(2, "0");
-    const currentDay = String(nowIsrael.getDate()).padStart(2, "0");
-    const todayStr = `${currentYear}-${currentMonth}-${currentDay}`;
-
-    if (date === todayStr) {
-      const currentHour = nowIsrael.getHours();
-      const currentMinute = nowIsrael.getMinutes();
-
-      const bufferHour = currentHour + 2;
-
-      availableSlots = availableSlots.filter((slot) => {
-        const [slotHour, slotMinute] = slot.split(":").map(Number);
-        return (
-          slotHour > bufferHour ||
-          (slotHour === bufferHour && slotMinute > currentMinute)
-        );
-      });
-    }
 
     res.status(200).json(availableSlots);
   } catch (error) {

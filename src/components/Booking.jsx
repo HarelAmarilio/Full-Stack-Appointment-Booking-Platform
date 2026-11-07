@@ -1,5 +1,11 @@
 import { useState, useEffect } from "react";
 import { createAppointment } from "../services/api"; // הסרנו את הייבוא הכפול של fetchAvailableSlots
+// [TZ fix] Israel-time helpers - dates behave the same on every device
+import {
+  getIsraelDateStr,
+  getDayOfWeek,
+  israelLocalToUtc,
+} from "../utils/israelTime";
 
 const API_BASE_URL = "https://yarin-appointments-api.onrender.com";
 
@@ -25,15 +31,16 @@ function Booking() {
     { id: 5, name: "עיצוב גבות טבעיות + שפם + צבע", price: 85 },
   ];
 
-  const minDate = new Date().toISOString().split("T")[0];
+  // [Buffer fix] Today in Israel (YYYY-MM-DD), not UTC - fixes the picker allowing yesterday after midnight
+  // [TZ fix] Shared Israel-time helper
+  const minDate = getIsraelDateStr();
   // [Abuse protection] Mirrors the server's 60-day booking window (the server is the authority)
-  const maxDate = new Date(Date.now() + 60 * 24 * 60 * 60 * 1000)
-    .toISOString()
-    .split("T")[0];
+  // [TZ fix] Counted in Israel days, not UTC
+  const maxDate = getIsraelDateStr(60);
 
   const fetchAvailableSlots = async (selectedDate) => {
-    const dateObj = new Date(selectedDate);
-    const dayOfWeek = dateObj.getDay();
+    // [TZ fix] Correct weekday in any time zone (getDay() shifted Sunday to Saturday west of Israel)
+    const dayOfWeek = getDayOfWeek(selectedDate);
 
     if (dayOfWeek === 5 || dayOfWeek === 6) {
       setMessage("הסטודיו סגור בימים שישי ושבת. נשמח לראותך בשאר ימי השבוע!");
@@ -53,26 +60,9 @@ function Booking() {
         return;
       }
 
-      let validSlots = data;
-
-      if (selectedDate === minDate) {
-        const now = new Date();
-        const currentHour = now.getHours();
-        const currentMinute = now.getMinutes();
-
-        const bufferHour = currentHour + 2;
-
-        validSlots = data.filter((slot) => {
-          const [slotHour, slotMinute] = slot.split(":").map(Number);
-          return (
-            slotHour > bufferHour ||
-            (slotHour === bufferHour && slotMinute > currentMinute)
-          );
-        });
-      }
-
       setMessage("");
-      setAvailableSlots(validSlots);
+      // [Buffer fix] The server already applies the 2-hour buffer in Israel time - show its list as is
+      setAvailableSlots(data);
     } catch (error) {
       console.error("❌ Failed to fetch available slots:", error.message);
       setMessage("שגיאה בהתחברות לשרת, נסה/י שוב מאוחר יותר");
@@ -167,22 +157,18 @@ function Booking() {
   const downloadAppleCalendarIcs = (date, time) => {
     if (!date || !time) return;
 
-    const [hour, minute] = time.split(":");
-    const endHour = String(Number(hour) + 1).padStart(2, "0");
-    const formattedDate = date.replace(/-/g, "");
-
-    const startTime = `${formattedDate}T${hour}${minute}00`;
-    const endTime = `${formattedDate}T${endHour}${minute}00`;
+    // [TZ fix] Exact UTC instants ("20261110T080000Z") instead of an empty, invalid VTIMEZONE
+    const toIcsUtc = (d) =>
+      d.toISOString().replace(/[-:]/g, "").replace(/\.\d{3}/, "");
+    const start = israelLocalToUtc(date, time);
+    const end = new Date(start.getTime() + 60 * 60 * 1000);
 
     const icsContent = [
       "BEGIN:VCALENDAR",
       "VERSION:2.0",
-      "BEGIN:VTIMEZONE",
-      "TZID:Asia/Jerusalem",
-      "END:VTIMEZONE",
       "BEGIN:VEVENT",
-      `DTSTART;TZID=Asia/Jerusalem:${startTime}`,
-      `DTEND;TZID=Asia/Jerusalem:${endTime}`,
+      `DTSTART:${toIcsUtc(start)}`,
+      `DTEND:${toIcsUtc(end)}`,
       `SUMMARY:תור ל${selectedService?.name || "עיצוב גבות"} - ניני`,
       "DESCRIPTION:מחכה לך! 🤍",
       "END:VEVENT",

@@ -5,6 +5,8 @@ import {
   deleteAppointment,
 } from "./services/api";
 import "./AdminDashboard.css";
+// [TZ fix] Israel-time helpers - the dashboard is correct even when the owner is abroad
+import { getIsraelDateStr, getIsraelNowStr } from "./utils/israelTime";
 
 const AdminDashboard = () => {
   const [token, setToken] = useState(localStorage.getItem("adminToken"));
@@ -18,7 +20,7 @@ const AdminDashboard = () => {
   // State for filtering appointments
   const [activeTab, setActiveTab] = useState("active");
   const [selectedMonth, setSelectedMonth] = useState(
-    new Date().toISOString().slice(0, 7), // פורמט: "YYYY-MM" (למשל "2026-09")
+    getIsraelDateStr().slice(0, 7), // פורמט: "YYYY-MM" (למשל "2026-09") // [TZ fix] current month in Israel
   );
 
   useEffect(() => {
@@ -93,6 +95,9 @@ const AdminDashboard = () => {
 
     return isStatusMatch && isMonthMatch;
   });
+
+  // [TZ fix] "Now" in Israel, computed once per render
+  const israelNow = getIsraelNowStr();
 
   if (!token) {
     return (
@@ -173,14 +178,11 @@ const AdminDashboard = () => {
           </thead>
           <tbody>
             {filteredAppointments.map((app) => {
-              // create a Date object for the current time and the appointment's date and time
-              const now = new Date();
-              const appointmentDateTime = new Date(
-                `${app.appointment_date.split("T")[0]}T${app.appointment_time}`,
-              );
-
               // is the appointment in the past? (for display purposes)
-              const isPast = appointmentDateTime < now;
+              // [TZ fix] Both sides are Israel wall-clock "YYYY-MM-DD HH:MM" strings
+              const isPast =
+                `${app.appointment_date.split("T")[0]} ${app.appointment_time.slice(0, 5)}` <
+                israelNow;
 
               // Determine the display status and badge class based on the appointment's status and whether it's in the past
               let displayStatus = "פעיל";
@@ -197,7 +199,11 @@ const AdminDashboard = () => {
               return (
                 <tr key={app.id}>
                   <td>
-                    {new Date(app.appointment_date).toLocaleDateString("he-IL")}
+                    {/* [TZ fix] The value is a calendar date at UTC midnight - format it in UTC */}
+                    {new Date(app.appointment_date).toLocaleDateString(
+                      "he-IL",
+                      { timeZone: "UTC" },
+                    )}
                   </td>
                   <td>{app.appointment_time.slice(0, 5)}</td>
                   <td>{app.client_name}</td>

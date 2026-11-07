@@ -14,6 +14,8 @@ const pool = mysql.createPool({
   waitForConnections: true,
   connectionLimit: 10,
   queueLimit: 0,
+  // [TZ fix] Build DATE values at UTC midnight regardless of the server's time zone
+  timezone: "Z",
 });
 
 /*
