@@ -153,7 +153,7 @@ In a second terminal:
 npm run dev
 ```
 
-Vite starts the client on `http://localhost:5173`. For local development, update the `API_BASE_URL` constants in `src/services/api.js` and `src/components/Booking.jsx` to point to your local API (`http://localhost:5001`) instead of the deployed Render URL.
+Vite starts the client on `http://localhost:5173`. For local development, update the `API_ORIGIN` constant in `src/services/api.js` to point to your local API (`http://localhost:5001`) instead of the deployed Render URL.
 
 ### 6. Build for production
 

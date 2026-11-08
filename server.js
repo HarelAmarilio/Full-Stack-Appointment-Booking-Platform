@@ -31,6 +31,17 @@ app.set("trust proxy", Number(process.env.TRUST_PROXY_HOPS ?? 1));
 // Middleware setup
 app.use(cors());
 app.use(express.json());
+
+// [Cold start fix] Lightweight liveness check for the uptime monitor and the site's wake-up call.
+// Outside /api on purpose: not rate-limited, never touches the database, answers in milliseconds.
+// Express answers HEAD requests from the same handler, so any monitor type works.
+app.get("/health", (req, res) => {
+  res.set("Cache-Control", "no-store");
+  res
+    .status(200)
+    .json({ status: "ok", uptimeSeconds: Math.round(process.uptime()) });
+});
+
 // [Abuse protection] General per-IP limit on the whole API
 app.use("/api", apiLimiter);
 
