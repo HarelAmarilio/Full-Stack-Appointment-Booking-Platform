@@ -1,23 +1,55 @@
 // src/services/api.js
-const API_BASE_URL = "https://yarin-appointments-api.onrender.com/api";
+// [Cold start fix] Single place for the server address (was duplicated in Booking.jsx)
+const API_ORIGIN = "https://yarin-appointments-api.onrender.com";
+const API_BASE_URL = `${API_ORIGIN}/api`;
 
-// 1. fething available slots for a given date
-export const fetchAvailableSlots = async (date) => {
-  try {
-    const response = await fetch(
-      `${API_BASE_URL}/available-slots?date=${date}`,
-    );
-    const data = await response.json();
+// [Cold start fix] The free server can take up to ~1 minute to wake up
+const WAKE_UP_BUDGET_MS = 90_000; // total time we keep trying before giving up
+const RETRY_DELAY_MS = 3_000;
+const RETRYABLE_STATUSES = [502, 503, 504]; // what the hosting proxy returns while the server boots
 
-    if (!response.ok) {
-      throw new Error(data.error || "שגיאה בשליפת השעות הפנויות");
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+// [Cold start fix] Fire-and-forget call that starts waking the server as soon as someone opens the
+// site, so it is usually awake by the time they reach the booking form. Runs once per page load.
+let wakeUpCall = null;
+export const wakeServer = () => {
+  wakeUpCall ??= fetch(`${API_ORIGIN}/health`, { cache: "no-store" }).catch(
+    () => {},
+  );
+  return wakeUpCall;
+};
+
+// [Cold start fix] GET that keeps retrying while the server wakes up (GET only - safe to repeat)
+const getWithWakeUp = async (url) => {
+  const deadline = Date.now() + WAKE_UP_BUDGET_MS;
+  while (Date.now() < deadline) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), deadline - Date.now());
+    try {
+      const response = await fetch(url, { signal: controller.signal });
+      if (!RETRYABLE_STATUSES.includes(response.status)) return response;
+    } catch {
+      // network error or timeout - the server is probably still waking up, try again
+    } finally {
+      clearTimeout(timer);
     }
-
-    return data;
-  } catch (error) {
-    console.error("❌ API Error (fetchAvailableSlots):", error.message);
-    throw error;
+    await sleep(RETRY_DELAY_MS);
   }
+  throw new Error("לא הצלחנו להתחבר למערכת כרגע. נסי שוב בעוד רגע.");
+};
+
+// 1. Fetching available slots for a given date
+export const fetchAvailableSlots = async (date) => {
+  const response = await getWithWakeUp(
+    `${API_BASE_URL}/available-slots?date=${encodeURIComponent(date)}`,
+  );
+  const data = await response.json().catch(() => null);
+  if (!response.ok) {
+    // validation / rate-limit messages from the server are shown as they are
+    throw new Error(data?.error || "שגיאה בשליפת השעות הפנויות");
+  }
+  return Array.isArray(data) ? data : [];
 };
 
 // [Rules fix] Fetching the treatment catalogue (source of truth: shared/businessRules.json on the server)

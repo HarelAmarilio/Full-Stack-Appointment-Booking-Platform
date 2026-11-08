@@ -1,4 +1,6 @@
+import { useEffect } from "react";
 import { Routes, Route } from "react-router-dom";
+import { wakeServer } from "./services/api"; // [Cold start fix]
 import Navbar from "./components/Navbar";
 import Hero from "./components/Hero";
 import About from "./components/About";
@@ -7,6 +9,11 @@ import Booking from "./components/Booking";
 import AdminDashboard from "./AdminDashboard"; // 👈 מייבאים את מסך הניהול החדש
 
 function App() {
+  // [Cold start fix] Clients usually browse the homepage first - wake the server meanwhile
+  useEffect(() => {
+    wakeServer();
+  }, []);
+
   return (
     <div className="app">
       <Navbar />

@@ -1,5 +1,9 @@
-import { useState, useEffect } from "react";
-import { createAppointment, fetchTreatments } from "../services/api"; // הסרנו את הייבוא הכפול של fetchAvailableSlots
+import { useState, useEffect, useRef } from "react";
+import {
+  createAppointment,
+  fetchTreatments,
+  fetchAvailableSlots, // [Cold start fix] shared API module, with wake-up retries
+} from "../services/api";
 // [TZ fix] Israel-time helpers - dates behave the same on every device
 import {
   getIsraelDateStr,
@@ -22,7 +26,8 @@ const getAppointmentTimes = (date, time) => {
 
 const PHONE_REGEX = new RegExp(rules.phonePattern); // [Rules fix]
 
-const API_BASE_URL = "https://yarin-appointments-api.onrender.com";
+// [Cold start fix] After this long, explain that the system is waking up
+const SLOW_SERVER_HINT_MS = 4000;
 
 function Booking() {
   const [bookedDetails, setBookedDetails] = useState(null);
@@ -56,46 +61,58 @@ function Booking() {
   // [TZ fix] Counted in Israel days, not UTC
   const maxDate = getIsraelDateStr(rules.maxDaysAhead); // [Rules fix]
 
-  const fetchAvailableSlots = async (selectedDate) => {
+  // [Cold start fix] "loading" | "ready" | "error" - an empty list is never shown while loading
+  const [slotsStatus, setSlotsStatus] = useState("ready");
+  const [slotsError, setSlotsError] = useState("");
+  const [isServerWaking, setIsServerWaking] = useState(false);
+  // [Cold start fix] Only the latest request may update the screen (the client can switch dates mid-load)
+  const latestSlotsRequest = useRef(0);
+
+  const loadSlots = async (selectedDate) => {
+    const requestId = ++latestSlotsRequest.current;
+    setAvailableSlots([]);
+    setSlotsError("");
+    setIsServerWaking(false);
+
     // [TZ fix] Correct weekday in any time zone (getDay() shifted Sunday to Saturday west of Israel)
-    // [Rules fix] Closed days come from the shared rules
+    // [Rules fix] Closed days come from the shared rules - no server call needed
     if (rules.closedDays.includes(getDayOfWeek(selectedDate))) {
       setMessage(
         `הסטודיו סגור בימים ${rules.closedDaysLabel}. נשמח לראותך בשאר ימי השבוע!`,
       );
-      setAvailableSlots([]);
+      setSlotsStatus("ready");
       return;
     }
 
+    setSlotsStatus("loading");
+    const slowTimer = setTimeout(() => {
+      if (requestId === latestSlotsRequest.current) setIsServerWaking(true);
+    }, SLOW_SERVER_HINT_MS);
+
     try {
-      const response = await fetch(
-        `${API_BASE_URL}/api/available-slots?date=${selectedDate}`,
-      );
-      const data = await response.json();
-
-      if (!response.ok) {
-        setMessage(data.error || "שגיאה בשליפת השעות הפנויות");
-        setAvailableSlots([]);
-        return;
-      }
-
-      setMessage("");
+      const slots = await fetchAvailableSlots(selectedDate);
+      if (requestId !== latestSlotsRequest.current) return; // a newer date was picked
       // [Buffer fix] The server already applies the 2-hour buffer in Israel time - show its list as is
-      setAvailableSlots(data);
+      setAvailableSlots(slots);
+      setSlotsStatus("ready");
     } catch (error) {
-      console.error("❌ Failed to fetch available slots:", error.message);
-      setMessage("שגיאה בהתחברות לשרת, נסה/י שוב מאוחר יותר");
-      setAvailableSlots([]);
+      if (requestId !== latestSlotsRequest.current) return;
+      setSlotsError(error.message);
+      setSlotsStatus("error");
+    } finally {
+      clearTimeout(slowTimer);
     }
   };
 
   useEffect(() => {
+    setSelectedTime("");
     if (!date) {
+      latestSlotsRequest.current++; // ignore any request still in flight
       setAvailableSlots([]);
       return;
     }
-    fetchAvailableSlots(date);
-    setSelectedTime("");
+    setMessage(""); // a new date clears the previous date's message
+    loadSlots(date);
   }, [date]);
 
   const handleSubmit = async (event) => {
@@ -149,12 +166,8 @@ function Booking() {
 
       if (error.status === 409) {
         setSelectedTime("");
-        try {
-          const slots = await fetchAvailableSlots(date);
-          if (slots) setAvailableSlots(slots);
-        } catch (fetchError) {
-          console.error("שגיאה ברענון השעות הפנויות:", fetchError);
-        }
+        // [Cold start fix] Refresh the slots without clearing the "slot taken" message
+        loadSlots(date);
       }
     } finally {
       setIsLoading(false);
@@ -273,9 +286,38 @@ function Booking() {
 
               {date && (
                 <div className="form-field">
-                  <label>בחרי שעה</label>
-                  <div className="time-slots">
-                    {availableSlots.length > 0 ? (
+                  <label id="time-slots-label">בחרי שעה</label>
+                  <div
+                    className="time-slots"
+                    role="group"
+                    aria-labelledby="time-slots-label"
+                    aria-busy={slotsStatus === "loading"}
+                  >
+                    {slotsStatus === "loading" ? (
+                      // [Cold start fix] Spinner instead of a misleading "no free times"
+                      <div className="slots-loading" role="status">
+                        <span className="spinner" aria-hidden="true" />
+                        <span>טוענים שעות פנויות…</span>
+                        {isServerWaking && (
+                          <span className="slots-loading-hint">
+                            המערכת מתעוררת, זה עשוי לקחת עד דקה. אין צורך לרענן
+                            את הדף 🤍
+                          </span>
+                        )}
+                      </div>
+                    ) : slotsStatus === "error" ? (
+                      // [Cold start fix] Error with a one-tap retry instead of a dead end
+                      <div className="slots-error" role="alert">
+                        <p>{slotsError}</p>
+                        <button
+                          type="button"
+                          className="retry-btn"
+                          onClick={() => loadSlots(date)}
+                        >
+                          נסי שוב
+                        </button>
+                      </div>
+                    ) : availableSlots.length > 0 ? (
                       availableSlots.map((slot) => (
                         <button
                           key={slot}
